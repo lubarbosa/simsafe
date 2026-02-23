@@ -1,0 +1,453 @@
+diff --git a/src/safe/model/SafeCrop.java b/src/safe/model/SafeCrop.java
+index 035d60a..49371b4 100644
+--- a/src/safe/model/SafeCrop.java
++++ b/src/safe/model/SafeCrop.java
+@@ -56,6 +56,25 @@ import java.util.Map;
+ 
+ import safe.stics.*;
+ 
++import java.util.HashMap;
++import java.io.BufferedReader;
++import java.io.IOException;
++import java.nio.file.Files;
++import java.nio.file.Path;
++import java.nio.file.Paths;
++
++import java.util.Scanner;
++
++import java.util.Calendar;
++import java.util.GregorianCalendar;
++
++import safe.model.SafeDailyClimat;
++
++import java.io.BufferedWriter;
++import java.io.FileWriter;
++import java.io.IOException;
++import java.io.File;
++
+ /**
+  * CROP represent the crop sowed on a SafeCell (can be baresoil)
+  * Only one SafeCrop is created by SafeCell (state variables of the crop are homogenous)
+@@ -279,6 +298,220 @@ import safe.stics.*;
+ 	/** Map of values for lai observed (if lai forced option)  */
+ 	public Map<String, SafeSticsLai> laiObservedMap;	
+ 
++	// Per-cell, per-day biomass overrides (keyed by (cellId, sticsJulianDay))
++	private static Map<Long, Double> biomassOverrideMap = null;
++	private static boolean biomassOverridesLoaded = false;
++	
++	// --------- Helper methods for cell/day keys ---------
++
++	private int getCellId() {
++		// SafeCell has getIdCell(), which returns the cell's ID
++		return this.getCell().getIdCell();
++	}
++
++	private static long makeKey(int cellId, int sticsJulianDay) {
++		// Pack two ints into one long
++		return (((long) cellId) << 32) | (sticsJulianDay & 0xffffffffL);
++	}
++	/**
++	private static void loadBiomassOverridesIfNeeded() {
++		if (biomassOverridesLoaded) return;
++		biomassOverridesLoaded = true;
++		biomassOverrideMap = new HashMap<Long, Double>();
++
++		//Path simFolder = getSimulationFolder();
++		if (simFolder == null) {
++			System.out.println("DEBUG SafeCrop: no simulation folder found for override loading.");
++			return;
++		}
++
++		Path overrideFile = simFolder.resolve("crop_biomass_override.csv");
++		if (!Files.exists(overrideFile)) {
++			System.out.println("DEBUG SafeCrop: override file not found: " + overrideFile);
++			return;
++		}
++
++		System.out.println("DEBUG SafeCrop: loading biomass overrides from " + overrideFile);
++
++		try (BufferedReader br = Files.newBufferedReader(overrideFile)) {
++			String line;
++			while ((line = br.readLine()) != null) {
++				line = line.trim();
++				if (line.isEmpty() || line.startsWith("#")) continue;
++
++				String[] parts = line.split(",");
++				if (parts.length < 3) continue;
++
++				int cellId = Integer.parseInt(parts[0].trim());
++				int sticsDay = Integer.parseInt(parts[1].trim());
++				double biom = Double.parseDouble(parts[2].trim());
++
++				long key = makeKey(cellId, sticsDay);
++				biomassOverrideMap.put(key, biom);
++			}
++		} catch (IOException e) {
++			System.err.println("ERROR SafeCrop: IO while reading crop_biomass_override.csv: " + e.getMessage());
++		} catch (NumberFormatException e) {
++			System.err.println("ERROR SafeCrop: number format in crop_biomass_override.csv: " + e.getMessage());
++		}
++
++		System.out.println("DEBUG SafeCrop: loaded " + biomassOverrideMap.size() + " biomass override entries.");
++	}
++	*/
++	private Double askBiomassFromConsole(int cellId, int sticsJulianDay) {
++		System.out.println();
++		System.out.println("=== MANUAL BIOMASS ENTRY REQUEST ===");
++		System.out.println("Cell ID: " + cellId + ", SticsJulianDay: " + sticsJulianDay);
++		System.out.println("Enter biomass (t/ha) for this cell/day,");
++		System.out.println("or just press Enter to keep STICS value,");
++		System.out.println("or type 'q' to stop simulation.");
++		System.out.print("> ");
++
++		try {
++			Scanner scanner = new Scanner(System.in);
++			String line = scanner.nextLine().trim();
++
++			if (line.equalsIgnoreCase("q")) {
++				System.out.println("User requested stop. Exiting simulation.");
++				// Hard stop - you can choose a different behavior
++				System.exit(0);
++			}
++
++			if (line.isEmpty()) {
++				System.out.println("No value entered, keeping STICS BIOMAER.");
++				return null;
++			}
++
++			double val = Double.parseDouble(line);
++			System.out.println("You entered: " + val + " t/ha");
++			return val;
++		} catch (Exception e) {
++			System.out.println("Invalid input, keeping STICS BIOMAER. (" + e.getMessage() + ")");
++			return null;
++		}
++	}
++
++
++	private void applyExternalCropOverride(int sticsJulianDay) {
++	    int cellId = getCellId();
++
++	    // Ask user for a value every time, or allow them to skip
++	    Double newBiom = askBiomassFromConsole(cellId, sticsJulianDay);
++
++	    if (newBiom == null) {
++		// User skipped or invalid - do nothing, keep STICS value
++		return;
++	    }
++
++	    // --- Apply override into STICS crop state so it is used tomorrow ---
++
++	    if (this.sticsCrop == null) {
++		System.out.println("WARNING: sticsCrop is null, cannot override STICS biomass.");
++		return;
++	    }
++	    int indice = (sticsJulianDay * 3) + 1;
++	    // Example: assume STICS crop biomass state is in field 'biomaer' (t/ha)
++	    // Adjust field name to match your SafeSticsCrop definition.
++	    float oldBiom = this.sticsCrop.masec[indice];
++
++	    System.out.println(
++		"OVERRIDE: Cell " + cellId
++		+ ", STICS day " + sticsJulianDay
++		+ " STICS " + oldBiom + " t/ha"
++	    );
++	    
++	    this.sticsCrop.masec[indice] = (float) (double) newBiom;
++	    
++	    System.out.println(
++		"OVERRIDE APPLIED: Cell " + cellId
++		+ ", STICS day " + sticsJulianDay
++		+ " SIMPLACE " + newBiom + " t/ha"
++	    );
++
++	}
++
++
++	/**
++	private void applyExternalCropOverride(int sticsJulianDay) {
++		int cellId = getCellId();
++
++		// Ask user for a value every time, or allow them to skip
++		Double newBiom = askBiomassFromConsole(cellId, sticsJulianDay);
++
++		if (newBiom == null) {
++			// User skipped or invalid - do nothing, keep STICS value
++			return;
++		}
++
++		// Apply override: newBiom is in t/ha.
++		// BIOMAER is an int, so round to nearest integer.
++		//sticsCommun.BIOMAER = (int)Math.round(newBiom);
++		int indice = (sticsJulianDay * 3) + 1;
++		this.sticsCrop.masec[indice] = (float) (double) newBiom;
++		this.biomass = (float) (double) newBiom;
++
++		System.out.println(
++			"DEBUG SafeCrop.applyExternalCropOverride: cellId=" + cellId
++ 			+ " sticsJulianDay=" + sticsJulianDay
++			+ " OVERRIDDEN BIOMAER_t_ha=" + newBiom
++			+ " (stored as int " + this.sticsCrop.masec[indice] + ")"
++		);
++	}*/
++	// In SafeCrop class (as a field)
++	private GregorianCalendar simulationDateStart = null;
++	
++	// For writing daily weather debug file
++	private BufferedWriter weatherWriter = null;
++	private boolean weatherHeaderWritten = false;
++	
++	// Simulation start date for this crop / simulation
++	//private GregorianCalendar simulationDateStart;
++
++	/** Set the simulation start date (copied from SafeEvolutionParameters or SafeSimulationLoader). */
++	//public void setSimulationDateStart(GregorianCalendar start) {
++	//    this.simulationDateStart = (start != null)
++	//	? (GregorianCalendar) start.clone()
++	//	: null;
++	//}
++
++	/**
++	* TEMP: Determine simulation folder for override file.
++	* For now we hardcode your example sim directory.
++	* Later, this can be made more generic.
++	*/
++	/**
++	private static Path getSimulationFolder() {
++		// Adjust this if you use another simulation folder
++		return Paths.get("/home/hydros/mysim/exemple2");
++	}
++	
++	private Double getOverrideForCellDay(int sticsJulianDay) {
++		if (biomassOverrideMap == null) return null;
++		int cellId = getCellId();
++		long key = makeKey(cellId, sticsJulianDay);
++		return biomassOverrideMap.get(key);
++	}
++	*/
++	/**
++	// Currently log-only: does not change sticsCrop yet
++	private void applyExternalCropOverride(int sticsJulianDay) {
++		Double newBiom = getOverrideForCellDay(sticsJulianDay);
++		if (newBiom == null) {
++			return;
++		}
++		
++		// Apply override: newBiom is in t/ha.
++		// BIOMAER is an int in SafeSticsCommun, so we round to nearest integer t/ha.
++		sticsCommun.BIOMAER = (int)Math.round(newBiom);
++
++		System.out.println(
++			"DEBUG SafeCrop.applyExternalCropOverride: cellId=" + getCellId()
++			+ " sticsJulianDay=" + sticsJulianDay
++			+ " OVERRIDDEN BIOMAER_t_ha=" + newBiom
++			+ " (stored as int " + sticsCommun.BIOMAER + ")"
++		);
++	}
++	*/
+ 	/**	
+ 	 *Constructor 
+ 	 * @param cell the SafeCell where the crop is sown
+@@ -324,6 +557,8 @@ import safe.stics.*;
+ 		this.diffuseParIntercepted= 0;
+ 		this.competitionIndexForTotalPar= 1;
+ 		this.startDay = 0;
++		// Load biomass overrides (once, shared across all cells)
++		//loadBiomassOverridesIfNeeded();
+ 	}
+ 	 	
+ 
+@@ -644,6 +879,17 @@ import safe.stics.*;
+ 	 * @param cellVisibleSky Cell visible sky in % 
+ 	 * @param flagFirst If this cell the first cell for the same crop zone (0=No 1=Yes)  
+ 	 **/
++	 
++	 
++
++    // 1) Field holding the current day's climate
++	//private SafeDailyClimat currentClimatDay;
++
++    // 2) Setter to be called once per day from the driver
++	//public void setCurrentClimatDay(SafeDailyClimat climateDay) {
++	//	this.currentClimatDay = climateDay;
++	//}
++    
+ 	public void processGrowth1 (SafeTestJNA safeJNA, 
+ 								SafeSticsParameters sticsParam, 
+ 								SafeSticsTransit sticsTransit, 
+@@ -657,6 +903,149 @@ import safe.stics.*;
+ 							    double cellVisibleSky,
+ 							    int flagFirst
+ 								) {
++		float tmin    = Float.NaN;
++		float tmax    = Float.NaN;
++		float tpm    = Float.NaN;
++		float tvent    = Float.NaN;
++		if (this.sticsClimat != null) {
++		    // determine index in climate arrays; typically day 1 -> index 0
++		    int idx = sticsJulianDay - 1;
++		    if (idx >= 0 && idx < this.sticsClimat.tmin.length) {
++		        tmin = this.sticsClimat.tmin[idx];   // tmin is float[]
++		    }
++		    if (idx >= 0 && idx < this.sticsClimat.tmin.length) {
++		        tmax = this.sticsClimat.tmax[idx];   // tmin is float[]
++		    }
++		    if (idx >= 0 && idx < this.sticsClimat.tmin.length) {
++		        tpm = this.sticsClimat.tpm[idx];   // tmin is float[]
++		    }
++		    if (idx >= 0 && idx < this.sticsClimat.tmin.length) {
++		        tvent = this.sticsClimat.tvent[idx];   // tmin is float[]
++		    }
++		}
++		
++		
++		// --- Compute Gregorian simulation date from simulationDateStart + simulationJulianDay ---
++		// --- Lazy initialization of the simulation start date (only once) ---
++		if (simulationDateStart == null) {
++		    // TODO: replace these constants with the real start date if you have it:
++		    int startYear  = 2000;
++		    int startMonth = 0;  // January = 0 in Calendar
++		    int startDay   = 1;  // 1st
++
++		    simulationDateStart = new GregorianCalendar(startYear, startMonth, startDay);
++		}
++
++		    // --- Compute Gregorian date for this simulationJulianDay ---
++		String gregorianDate = "unknownDate";
++		if (simulationDateStart != null) {
++		    GregorianCalendar currentDate = (GregorianCalendar) simulationDateStart.clone();
++
++		    // If simulationJulianDay = 1 for the first simulated day:
++		    currentDate.add(Calendar.DAY_OF_YEAR, simulationJulianDay - 1);
++		    // If your simulationJulianDay starts at 0, use:
++		    // currentDate.add(Calendar.DAY_OF_YEAR, simulationJulianDay);
++
++		    int year  = currentDate.get(Calendar.YEAR);
++		    int month = currentDate.get(Calendar.MONTH) + 1; // MONTH is 0-based
++		    int day   = currentDate.get(Calendar.DAY_OF_MONTH);
++
++		    gregorianDate = String.format("%02d.%02d.%04d", day, month, year);
++		}
++		
++		// Debug: Hi-SAFE -> STICS inputs for this cell and day
++		try {
++		    SafeCell c = this.getCell();
++		    SafeCropZone zone = c.getCropZone();
++		    String zoneName = (zone != null ? zone.getName() : "nullZone");
++		    // If you have a species name in SafeCrop
++		    String cropName = (this.cropSpeciesName != null ? this.cropSpeciesName : "nullCrop");
++		    //GregorianCalendar is in safeModel.java
++		    //int year  = this.getYear();
++		    //int month = currentDate.getMonthValue(); // 1-12
++		    //int day   = currentDate.getDayOfMonth(); // 1-31
++
++		    System.out.println(
++			"SafeCrop.HiSafeToStics:"
++			+ " HiSFeDay=" + simulationJulianDay
++			+ " SimplaceDay=" + sticsJulianDay
++			+ " simDate=" + gregorianDate
++			+ " cellRad=" + cellRad
++			+ " Tmin=" + tmin
++			+ " Tmax=" + tmax
++			+ " Vp=" + tpm
++			+ " wind=" + tvent
++			+ " cellRain=" + cellRain
++			+ " zone=" + zoneName
++			+ " crop=" + cropName
++			+ " cellId=" + getCellId()
++			+ " flagFirst=" + flagFirst
++			+ " cellEtp=" + cellEtp
++			+ " cellVisibleSky=" + cellVisibleSky
++		    );
++		    
++		    // --- Write daily weather line to file ---
++		    try {
++		        if (weatherWriter == null) {
++			    //String fileName = "/home/hydros/Downloads/SIMPLACE/SIMPLACE_WORK/SimulationExperimentTemplate/data/weather/sevilla.txt";  // adjust path if needed
++			    String fileName = "/home/hydros/mysim/exemple2/sevilla.txt";
++			    File f = new File(fileName);
++			    boolean fileExistsAndNonEmpty = f.exists() && f.length() > 0;
++
++			    weatherWriter = new BufferedWriter(new FileWriter(f, true));
++
++			    // If file is new or empty, write header
++			    if (!fileExistsAndNonEmpty) {
++			        weatherWriter.write("CURRENTDAY\tIrradiation\tTmin\tTmax\tVapourPressure\tWindSpeed\tPrecipitation");
++			        weatherWriter.newLine();
++			        weatherHeaderWritten = true;
++			    } else {
++			           weatherHeaderWritten = true; // header already there from previous runs
++			    }
++		        }
++
++		    // Now write one data line per call
++		        String line =
++			    gregorianDate + "\t" +   // CURRENTDAY (e.g. 01.01.2000)
++			    cellRad       + "\t" +   // Irradiation
++			    tmin          + "\t" +   // Tmin
++			    tmax          + "\t" +   // Tmax
++			    tpm           + "\t" +   // VapourPressure
++			    tvent         + "\t" +   // WindSpeed
++			    cellRain;                // Precipitation
++
++		        weatherWriter.write(line);
++		        weatherWriter.newLine();
++		        weatherWriter.flush();
++		    } catch (IOException ioe) {
++		        System.out.println("SafeCrop.HiSafeToStics: failed to write sevilla.txt: " + ioe.getMessage());
++		    }
++		    
++		    
++		    
++		} catch (Exception e) {
++		    // Avoid crashing the simulation because of debug logging
++		    System.out.println("DEBUG SafeCrop.HiSafeToStics: logging failed: " + e.getMessage());
++		}
++		
++		// STICS state at start of this day (what will be used as input for today's simulation)
++		if (this.sticsCrop != null && this.sticsCrop.masec != null) {
++		    int startIndex = (sticsJulianDay * 3) + 1;  // same formula you use later
++		    if (startIndex >= 0 && startIndex < this.sticsCrop.masec.length) {
++			System.out.println(
++			    "STICS STATE AT START OF DAY:"
++			    + " day=" + sticsJulianDay
++			    + " cell=" + this.getCell().getIdCell()
++			    + " masec(start)[" + startIndex + "]=" + this.sticsCrop.masec[startIndex]
++			);
++		    } else {
++			System.out.println(
++			    "STICS STATE AT START OF DAY: invalid masec index "
++			    + startIndex + " for day=" + sticsJulianDay
++			);
++		    }
++		}
++		
+ 		
+ 		//call JNA native method
+ 		SafeTestJNA.dailyLoopPart1(sticsParam, 
+@@ -675,6 +1064,14 @@ import safe.stics.*;
+ 							cellVisibleSky,
+ 							flagFirst);
+ 
++		// TEMP: debug print to confirm we are in processGrowth1
++		System.out.println(
++			"DEBUG SafeCrop.processGrowth1: cellId=" + this.getCell().getIdCell()
++			+ " sticsJulianDay=" + sticsJulianDay
++		);
++		// Check if an external override exists for this cell/day (log only for now)
++		applyExternalCropOverride(sticsJulianDay);
++
+ 		//variable storage
+ 		if (this.startDay == 0) this.startDay = simulationJulianDay;
+ 
+@@ -702,6 +1099,9 @@ import safe.stics.*;
+ 		this.qNplante 		= this.sticsCrop.QNplante[indice2];		
+ 		
+ 		return;
++		
++		//applyExternalCropOverride(sticsJulianDay);
++	
+ 	}
+ 
+ 	/**

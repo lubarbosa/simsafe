@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+target/
+
+# SIMPLACE outputs
+simplace/output/
+*.out
+*.log
+
+# Hi-sAFe outputs
+*.psf
+*.scene
+
+# Data files (large)
+*.csv
+*.txt
+!examples/*.csv
+!examples/*.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp

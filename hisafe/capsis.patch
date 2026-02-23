@@ -1,0 +1,15 @@
+diff --git a/capsis.sh b/capsis.sh
+index 439e015..ea6b465 100644
+--- a/capsis.sh
++++ b/capsis.sh
+@@ -102,8 +102,8 @@ fi
+ 
+ #---- Launch Capsis
+ # fc-25.3.2021 added javaCommand for preferredJava if set
+-${javaCommand} $jvmOptions $splashoption -Xmx${memo} -cp ./class:./ext/*:$jlp -Djna.library.path=$jlp -Djava.library.path=$jlp capsis.app.Starter $args
+-
++#${javaCommand} $jvmOptions $splashoption -Xmx${memo} -cp ./class:./ext/*:$jlp -Djna.library.path=$jlp -Djava.library.path=$jlp capsis.app.Starter $args
++/usr/lib/jvm/java-8-openjdk-amd64/jre/bin/java $jvmOptions $splashoption -Xmx${memo} -cp ./class:./ext/*:$jlp -Djna.library.path=$jlp -Djava.library.path=$jlp capsis.app.Starter $args
+ 
+ 
+ # fc-28.11.2017 added :$jlp at the end of -cp for Hi-sAFe & Stics
