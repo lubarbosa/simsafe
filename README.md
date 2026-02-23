@@ -1,6 +1,6 @@
 # SimSafe
 
-Integration framework coupling Hi-sAFe agroforestry model with SIMPLACE crop simulation platform.
+SIMPLACE–Hi-sAFe Integrated AgroForestry Simulation Environment.
 
 ## Overview
 
@@ -33,7 +33,7 @@ See [docs/USAGE.md](docs/USAGE.md)
 
 ## Authors
 
-- Luciano Barbosa (@lubarbosa)
+- Luis Barbosa (@lubarbosa)
 
 ## Citation
 
